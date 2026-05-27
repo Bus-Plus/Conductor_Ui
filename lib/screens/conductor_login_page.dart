@@ -16,14 +16,11 @@ class ConductorLoginPage extends StatefulWidget {
 class _ConductorLoginPageState extends State<ConductorLoginPage> {
   final AuthService _authService = AuthService();
 
-  List<String> busRoutes = [];
-  String? selectedRoute;
-  List<String> busNumbers = [];
-  String? selectedBusNumber;
+  List<String> routeIds = [];
+  String? selectedRouteId;
   bool isAuthenticated = false;
-  bool isLoading = true;
   bool isProcessing = false;
-  bool isLoadingBusNumbers = false;
+  bool isFetchingRouteIds = false;
 
   final TextEditingController userIdController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
@@ -34,30 +31,9 @@ class _ConductorLoginPageState extends State<ConductorLoginPage> {
   @override
   void initState() {
     super.initState();
-    fetchBusRoutes();
   }
 
-  Future<void> fetchBusRoutes() async {
-  try {
-    // Get all documents in the 'bus_status' collection
-    final snapshot = await FirebaseFirestore.instance.collection('bus_status').get();
-
-    setState(() {
-      // Extract all document IDs as route IDs
-      busRoutes = snapshot.docs.map((doc) => doc.id).toList();
-      isLoading = false;
-    });
-  } catch (e) {
-    debugPrint('Error fetching routes: $e');
-    if (!mounted) return;
-    setState(() {
-      isLoading = false;
-    });
-  }
-}
-
-
-Future<void> initializeBusStatus({
+  Future<void> initializeBusStatus({
   required String selectedRoute,
   required String transportNumber,
 }) async {
@@ -100,31 +76,23 @@ Future<void> initializeBusStatus({
       return;
     }
 
-    if (selectedRoute == null) {
+    if (selectedRouteId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a bus route')),
-      );
-      return;
-    }
-
-    if (selectedBusNumber == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a bus number')),
+        const SnackBar(content: Text('Please select a route')),
       );
       return;
     }
 
     try {
       await _authService.initializeConductorBus(
-        routeId: selectedRoute!,
-        busNumber: selectedBusNumber!,
+        routeId: selectedRouteId!,
         accessToken: _accessToken!,
         username: _userId ?? userIdController.text.trim(),
       );
 
       await initializeBusStatus(
-        selectedRoute: selectedRoute!,
-        transportNumber: selectedBusNumber!,
+        selectedRoute: selectedRouteId!,
+        transportNumber: selectedRouteId!,
       );
 
       if (!mounted) return;
@@ -132,8 +100,8 @@ Future<void> initializeBusStatus({
         context,
         MaterialPageRoute(
           builder: (context) => ConductorHomePage(
-            busNumber: selectedBusNumber!,
-            routeId: selectedRoute!,
+            busNumber: selectedRouteId!,
+            routeId: selectedRouteId!,
           ),
         ),
       );
@@ -177,8 +145,11 @@ Future<void> initializeBusStatus({
         isAuthenticated = true;
       });
 
+      await _loadRouteIds();
+
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Login successful. Select route and bus.')),
+        const SnackBar(content: Text('Login successful. Select route to initialize.')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -194,28 +165,28 @@ Future<void> initializeBusStatus({
     }
   }
 
-  Future<void> _loadBusNumbersForRoute(String routeId) async {
+  Future<void> _loadRouteIds() async {
     setState(() {
-      isLoadingBusNumbers = true;
-      busNumbers = [];
-      selectedBusNumber = null;
+      isFetchingRouteIds = true;
+      routeIds = [];
+      selectedRouteId = null;
     });
 
     try {
-      final numbers = await _authService.fetchAvailableBusNumbers();
+      final ids = await _authService.fetchAvailableRouteIds();
       if (!mounted) return;
       setState(() {
-        busNumbers = numbers;
+        routeIds = ids;
       });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not load bus numbers: $e')),
+        SnackBar(content: Text('Could not load route ids: $e')),
       );
     } finally {
       if (mounted) {
         setState(() {
-          isLoadingBusNumbers = false;
+          isFetchingRouteIds = false;
         });
       }
     }
@@ -225,9 +196,7 @@ Future<void> initializeBusStatus({
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6FA),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SafeArea(
+      body: SafeArea(
               child: SingleChildScrollView(
                 child: Column(
                   children: [
@@ -332,7 +301,7 @@ Future<void> initializeBusStatus({
                               ] else ...[
                                 DropdownButtonFormField<String>(
                                   decoration: InputDecoration(
-                                    labelText: 'Select Bus Route',
+                                    labelText: 'Select Route',
                                     prefixIcon: const Icon(Icons.route,
                                         color: Color(0xFF1565C0)),
                                     border: OutlineInputBorder(
@@ -341,57 +310,28 @@ Future<void> initializeBusStatus({
                                     filled: true,
                                     fillColor: const Color(0xFFF9FAFB),
                                   ),
-                                  value: selectedRoute,
-                                  items: busRoutes.map((route) {
+                                  value: selectedRouteId,
+                                  items: routeIds.map((routeId) {
                                     return DropdownMenuItem(
-                                      value: route,
-                                      child: Text(route),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    if (value == null) return;
-                                    setState(() {
-                                      selectedRoute = value;
-                                      selectedBusNumber = null;
-                                      busNumbers = [];
-                                    });
-                                    _loadBusNumbersForRoute(value);
-                                  },
-                                ),
-                                const SizedBox(height: 16),
-                                DropdownButtonFormField<String>(
-                                  decoration: InputDecoration(
-                                    labelText: 'Select Bus Number',
-                                    prefixIcon: const Icon(Icons.directions_bus,
-                                        color: Color(0xFF1565C0)),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    filled: true,
-                                    fillColor: const Color(0xFFF9FAFB),
-                                  ),
-                                  value: selectedBusNumber,
-                                  items: busNumbers.map((bus) {
-                                    return DropdownMenuItem(
-                                      value: bus,
-                                      child: Text(bus),
+                                      value: routeId,
+                                      child: Text(routeId),
                                     );
                                   }).toList(),
                                   onChanged: (value) {
                                     setState(() {
-                                      selectedBusNumber = value;
+                                      selectedRouteId = value;
                                     });
                                   },
                                 ),
                                 const SizedBox(height: 12),
-                                if (isLoadingBusNumbers)
+                                if (isFetchingRouteIds)
                                   const Text(
-                                    'Loading bus numbers for the selected route...',
+                                    'Loading route ids...',
                                     style: TextStyle(color: Colors.grey),
                                   )
-                                else if (selectedRoute != null && busNumbers.isEmpty)
+                                else if (routeIds.isEmpty)
                                   const Text(
-                                    'No bus numbers available for the selected route.',
+                                    'No route ids available. Try logging in again.',
                                     style: TextStyle(color: Colors.grey),
                                   ),
                               ],

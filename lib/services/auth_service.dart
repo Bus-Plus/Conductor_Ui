@@ -88,7 +88,7 @@ class AuthService {
     }
   }
 
-  Future<List<String>> fetchAvailableBusNumbers() async {
+  Future<List<String>> fetchAvailableRouteIds() async {
     final url = Uri.parse('${ApiConfig.busBaseUrl}/connectivity/bus-numbers');
     final response = await http.get(
       url,
@@ -97,13 +97,13 @@ class AuthService {
 
     final body = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
     if (response.statusCode != 200) {
-      final message = body['message'] ?? body['error'] ?? 'Could not fetch bus numbers';
+      final message = body['message'] ?? body['error'] ?? 'Could not fetch route ids';
       throw Exception(message);
     }
 
     final ids = body['ids'];
     if (ids is! List) {
-      throw Exception('Unexpected bus numbers response format.');
+      throw Exception('Unexpected route ids response format.');
     }
 
     return ids.map((item) => item.toString()).toList();
@@ -111,7 +111,6 @@ class AuthService {
 
   Future<void> initializeConductorBus({
     required String routeId,
-    required String busNumber,
     required String accessToken,
     required String username,
   }) async {
@@ -122,7 +121,6 @@ class AuthService {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $accessToken',
       },
-      body: jsonEncode({'bus_number': busNumber}),
     );
 
     if (response.statusCode != 200) {
