@@ -83,16 +83,23 @@ class _ConductorLoginPageState extends State<ConductorLoginPage> {
       return;
     }
 
+    if (_userId == null || _userId!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing bus number username from login.')),
+      );
+      return;
+    }
+
     try {
       await _authService.initializeConductorBus(
         routeId: selectedRouteId!,
         accessToken: _accessToken!,
-        username: _userId ?? userIdController.text.trim(),
+        username: _userId!,
       );
 
       await initializeBusStatus(
         selectedRoute: selectedRouteId!,
-        transportNumber: selectedRouteId!,
+        transportNumber: _userId!,
       );
 
       if (!mounted) return;
@@ -100,7 +107,7 @@ class _ConductorLoginPageState extends State<ConductorLoginPage> {
         context,
         MaterialPageRoute(
           builder: (context) => ConductorHomePage(
-            busNumber: selectedRouteId!,
+            busNumber: _userId!,
             routeId: selectedRouteId!,
           ),
         ),

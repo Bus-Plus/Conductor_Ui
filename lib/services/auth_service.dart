@@ -130,6 +130,27 @@ class AuthService {
     }
   }
 
+  Future<void> resetConductorBus({
+    required String routeId,
+    required String busNumber,
+    required String accessToken,
+  }) async {
+    final url = Uri.parse('${ApiConfig.conductorBaseUrl}/conductor/bus/$routeId/$busNumber/reset');
+    final response = await http.put(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+
+    if (response.statusCode != 200) {
+      final body = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
+      final message = body['message'] ?? body['error'] ?? 'Could not reset conductor bus';
+      throw Exception(message);
+    }
+  }
+
   Future<void> clearTokens() async {
     await _secureStorage.delete(key: _accessTokenKey);
     await _secureStorage.delete(key: _refreshTokenKey);

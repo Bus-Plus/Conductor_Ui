@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/auth_service.dart';
 import 'issue_ticket_page.dart';
 
 class ConductorHomePage extends StatefulWidget {
@@ -92,24 +93,39 @@ class _ConductorHomePageState extends State<ConductorHomePage> {
     }
   }
 
+  final AuthService _authService = AuthService();
+
   void _resetTrip() async {
     setState(() {
       currentStopIndex = 0;
     });
 
-    await FirebaseFirestore.instance
-        .collection('bus_status')
-        .doc(widget.routeId)
-        .collection('busses')
-        .doc(widget.busNumber)
-        .set({
-      'currentStop': 0,
-      'stops': List.filled(stops.length, 0),
-    });
+    final tokens = await _authService.getTokens();
+    final accessToken = tokens['access_token'];
+    if (accessToken == null || accessToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to reset: missing access token.')),
+      );
+      return;
+    }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("🧹 Trip Reset Successfully")),
-    );
+    try {
+      await _authService.resetConductorBus(
+        routeId: widget.routeId,
+        busNumber: widget.busNumber,
+        accessToken: accessToken,
+      );
+
+      await fetchStops();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("🧹 Trip Reset Successfully")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Reset failed: $e')),
+      );
+    }
   }
 
   Future<void> _deleteTransportDocument() async {
