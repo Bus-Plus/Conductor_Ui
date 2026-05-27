@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'conductor_home_page.dart';
 import 'package:flutter/services.dart';
 
+import '../services/auth_service.dart';
+
 
 class ConductorLoginPage extends StatefulWidget {
   const ConductorLoginPage({super.key});
@@ -12,10 +14,22 @@ class ConductorLoginPage extends StatefulWidget {
 }
 
 class _ConductorLoginPageState extends State<ConductorLoginPage> {
+  final AuthService _authService = AuthService();
+
   List<String> busRoutes = [];
   String? selectedRoute;
+  List<String> busNumbers = [];
+  String? selectedBusNumber;
+  bool isAuthenticated = false;
   bool isLoading = true;
-  final TextEditingController transportNumberController = TextEditingController();
+  bool isProcessing = false;
+  bool isLoadingBusNumbers = false;
+
+  final TextEditingController userIdController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
+
+  String? _accessToken;
+  String? _userId;
 
   @override
   void initState() {
@@ -34,7 +48,8 @@ class _ConductorLoginPageState extends State<ConductorLoginPage> {
       isLoading = false;
     });
   } catch (e) {
-    print('Error fetching routes: $e');
+    debugPrint('Error fetching routes: $e');
+    if (!mounted) return;
     setState(() {
       isLoading = false;
     });
@@ -80,37 +95,129 @@ Future<void> initializeBusStatus({
 
 
   void handleLogin() async {
-    final transportNumber = transportNumberController.text.trim();
+    if (!isAuthenticated) {
+      await _authenticate();
+      return;
+    }
+
     if (selectedRoute == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Please select a bus route')),
+        const SnackBar(content: Text('Please select a bus route')),
       );
       return;
     }
-    if (transportNumber.length != 4) {
+
+    if (selectedBusNumber == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Enter last 4 digits of transport number')),
+        const SnackBar(content: Text('Please select a bus number')),
       );
       return;
     }
+
     try {
+      await _authService.initializeConductorBus(
+        routeId: selectedRoute!,
+        busNumber: selectedBusNumber!,
+        accessToken: _accessToken!,
+        username: _userId ?? userIdController.text.trim(),
+      );
+
       await initializeBusStatus(
         selectedRoute: selectedRoute!,
-        transportNumber: transportNumber,
+        transportNumber: selectedBusNumber!,
       );
+
+      if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ConductorHomePage(
-            busNumber: transportNumber, // Adapt ConductorHomePage to support (route, transport number) if needed
-            routeId: selectedRoute!,    // You may want to pass both
+            busNumber: selectedBusNumber!,
+            routeId: selectedRoute!,
           ),
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Initialization failed: $e')),
       );
+    }
+  }
+
+  Future<void> _authenticate() async {
+    final userId = userIdController.text.trim();
+    final password = passwordController.text;
+
+    if (password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password is required')),
+      );
+      return;
+    }
+
+    setState(() {
+      isProcessing = true;
+    });
+
+    try {
+      final loginResult = await _authService.login(
+        userId: userId,
+        password: password,
+      );
+
+      await _authService.validateConductor(
+        accessToken: loginResult['access_token'] as String,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _accessToken = loginResult['access_token'] as String;
+        _userId = loginResult['user_id'] as String;
+        isAuthenticated = true;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login successful. Select route and bus.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Login failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isProcessing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadBusNumbersForRoute(String routeId) async {
+    setState(() {
+      isLoadingBusNumbers = true;
+      busNumbers = [];
+      selectedBusNumber = null;
+    });
+
+    try {
+      final numbers = await _authService.fetchAvailableBusNumbers();
+      if (!mounted) return;
+      setState(() {
+        busNumbers = numbers;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not load bus numbers: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoadingBusNumbers = false;
+        });
+      }
     }
   }
 
@@ -180,73 +287,123 @@ Future<void> initializeBusStatus({
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              const Text(
-                                'Select your route and enter your transport number to begin.',
+                              Text(
+                                isAuthenticated
+                                    ? 'Select your route and bus number to initialize your shift.'
+                                    : 'Enter your 4-digit user ID and password to sign in.',
                                 style:
-                                    TextStyle(fontSize: 13, color: Colors.grey),
+                                    const TextStyle(fontSize: 13, color: Colors.grey),
                               ),
                               const SizedBox(height: 24),
-                              DropdownButtonFormField<String>(
-                                decoration: InputDecoration(
-                                  labelText: 'Select Bus Route',
-                                  prefixIcon: const Icon(Icons.route,
-                                      color: Color(0xFF1565C0)),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
+                              if (!isAuthenticated) ...[
+                                TextFormField(
+                                  controller: userIdController,
+                                  decoration: InputDecoration(
+                                    labelText: 'User ID (4 digits)',
+                                    prefixIcon: const Icon(Icons.person,
+                                        color: Color(0xFF1565C0)),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    filled: true,
+                                    fillColor: const Color(0xFFF9FAFB),
                                   ),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF9FAFB),
+                                  keyboardType: TextInputType.number,
+                                  maxLength: 4,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                  ],
                                 ),
-                                value: selectedRoute,
-                                items: busRoutes.map((route) {
-                                  return DropdownMenuItem(
-                                    value: route,
-                                    child: Text(route),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  setState(() {
-                                    selectedRoute = value;
-                                  });
-                                },
-                              ),
-                              const SizedBox(height: 16),
-                              TextFormField(
-                                controller: transportNumberController,
-                                decoration: InputDecoration(
-                                  labelText: 'Last 4 Digits of Transport No.',
-                                  prefixIcon: const Icon(Icons.dialpad,
-                                      color: Color(0xFF1565C0)),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
+                                const SizedBox(height: 16),
+                                TextFormField(
+                                  controller: passwordController,
+                                  decoration: InputDecoration(
+                                    labelText: 'Password',
+                                    prefixIcon: const Icon(Icons.lock,
+                                        color: Color(0xFF1565C0)),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    filled: true,
+                                    fillColor: const Color(0xFFF9FAFB),
                                   ),
-                                  filled: true,
-                                  fillColor: const Color(0xFFF9FAFB),
+                                  obscureText: true,
                                 ),
-                                keyboardType: TextInputType.number,
-                                maxLength: 4,
-                                validator: (val) {
-                                  if (val == null || val.isEmpty) {
-                                    return 'Enter transport number digits';
-                                  }
-                                  if (!RegExp(r'^\d{4}$').hasMatch(val)) {
-                                    return 'Must be exactly 4 digits';
-                                  }
-                                  return null;
-                                },
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.digitsOnly,
-                                ],
-                              ),
+                              ] else ...[
+                                DropdownButtonFormField<String>(
+                                  decoration: InputDecoration(
+                                    labelText: 'Select Bus Route',
+                                    prefixIcon: const Icon(Icons.route,
+                                        color: Color(0xFF1565C0)),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    filled: true,
+                                    fillColor: const Color(0xFFF9FAFB),
+                                  ),
+                                  value: selectedRoute,
+                                  items: busRoutes.map((route) {
+                                    return DropdownMenuItem(
+                                      value: route,
+                                      child: Text(route),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) {
+                                    if (value == null) return;
+                                    setState(() {
+                                      selectedRoute = value;
+                                      selectedBusNumber = null;
+                                      busNumbers = [];
+                                    });
+                                    _loadBusNumbersForRoute(value);
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                                DropdownButtonFormField<String>(
+                                  decoration: InputDecoration(
+                                    labelText: 'Select Bus Number',
+                                    prefixIcon: const Icon(Icons.directions_bus,
+                                        color: Color(0xFF1565C0)),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    filled: true,
+                                    fillColor: const Color(0xFFF9FAFB),
+                                  ),
+                                  value: selectedBusNumber,
+                                  items: busNumbers.map((bus) {
+                                    return DropdownMenuItem(
+                                      value: bus,
+                                      child: Text(bus),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) {
+                                    setState(() {
+                                      selectedBusNumber = value;
+                                    });
+                                  },
+                                ),
+                                const SizedBox(height: 12),
+                                if (isLoadingBusNumbers)
+                                  const Text(
+                                    'Loading bus numbers for the selected route...',
+                                    style: TextStyle(color: Colors.grey),
+                                  )
+                                else if (selectedRoute != null && busNumbers.isEmpty)
+                                  const Text(
+                                    'No bus numbers available for the selected route.',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                              ],
                               const SizedBox(height: 8),
                               SizedBox(
                                 height: 50,
                                 child: ElevatedButton.icon(
-                                  onPressed: handleLogin,
-                                  icon: const Icon(Icons.login),
-                                  label: const Text(
-                                    'Login',
-                                    style: TextStyle(
+                                  onPressed: isProcessing ? null : handleLogin,
+                                  icon: Icon(isAuthenticated ? Icons.check : Icons.login),
+                                  label: Text(
+                                    isAuthenticated ? 'Initialize Bus' : 'Login',
+                                    style: const TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold),
                                   ),
@@ -273,7 +430,8 @@ Future<void> initializeBusStatus({
 
   @override
   void dispose() {
-    transportNumberController.dispose();
+    userIdController.dispose();
+    passwordController.dispose();
     super.dispose();
   }
 }

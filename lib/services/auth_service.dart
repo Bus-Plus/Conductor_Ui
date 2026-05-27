@@ -20,7 +20,7 @@ class AuthService {
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'userId': userId, 'password': password}),
+      body: jsonEncode({'username': userId, 'password': password}),
     );
 
     final body = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
@@ -67,6 +67,69 @@ class AuthService {
       'refresh_token': refreshToken,
       'user_id': userId,
     };
+  }
+
+  Future<void> validateConductor({
+    required String accessToken,
+  }) async {
+    final url = Uri.parse('${ApiConfig.conductorBaseUrl}/conductor/validate');
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+
+    if (response.statusCode != 200) {
+      final body = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
+      final message = body['message'] ?? body['error'] ?? 'Validation failed';
+      throw Exception(message);
+    }
+  }
+
+  Future<List<String>> fetchAvailableBusNumbers() async {
+    final url = Uri.parse('${ApiConfig.busBaseUrl}/connectivity/bus-numbers');
+    final response = await http.get(
+      url,
+      headers: {'Content-Type': 'application/json'},
+    );
+
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
+    if (response.statusCode != 200) {
+      final message = body['message'] ?? body['error'] ?? 'Could not fetch bus numbers';
+      throw Exception(message);
+    }
+
+    final ids = body['ids'];
+    if (ids is! List) {
+      throw Exception('Unexpected bus numbers response format.');
+    }
+
+    return ids.map((item) => item.toString()).toList();
+  }
+
+  Future<void> initializeConductorBus({
+    required String routeId,
+    required String busNumber,
+    required String accessToken,
+    required String username,
+  }) async {
+    final url = Uri.parse('${ApiConfig.conductorBaseUrl}/conductor/bus/$routeId/$username/initialize');
+    final response = await http.put(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode({'bus_number': busNumber}),
+    );
+
+    if (response.statusCode != 200) {
+      final body = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
+      final message = body['message'] ?? body['error'] ?? 'Could not initialize conductor bus';
+      throw Exception(message);
+    }
   }
 
   Future<void> clearTokens() async {
